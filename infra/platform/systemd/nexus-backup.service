@@ -1,0 +1,14 @@
+[Unit]
+Description=Nexus encrypted NAS backup
+Wants=network-online.target
+After=network-online.target docker.service
+RequiresMountsFor=/mnt/nexus-backups
+
+[Service]
+Type=oneshot
+User=nexus
+Group=nexus
+SupplementaryGroups=docker
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/nexus-local-ai/infra/platform/backup.py --config /srv/nexus/platform/backup.json
+Nice=10

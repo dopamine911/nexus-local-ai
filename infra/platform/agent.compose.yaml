@@ -1,0 +1,26 @@
+services:
+  agent:
+    image: ${BESZEL_AGENT_IMAGE:?Use enrollment template}
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LISTEN: '${AGENT_IP:?Explicit Tailscale IP}:45876'
+      KEY: ${KEY:?Hub public SSH key}
+      TOKEN: ${TOKEN:?Per-system agent token}
+      HUB_URL: ${HUB_URL:?Hub URL}
+      CA_CERT_FILE: /trust/root.crt
+      GPU_COLLECTOR: amd_sysfs
+      DOCKER_IMAGE_CHECK: 'false'
+    volumes:
+      - '${AGENT_STATE_ROOT}/data:/var/lib/beszel-agent'
+      - '${AGENT_STATE_ROOT}/trust:/trust:ro'
+      - /sys:/sys:ro
+      - /etc/os-release:/etc/os-release:ro
+    healthcheck:
+      test: [CMD, /agent, health]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}

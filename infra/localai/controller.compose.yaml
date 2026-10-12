@@ -1,0 +1,81 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?Run lab.py init-controller}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: localai
+      POSTGRES_USER: localai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Missing database password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U localai -d localai']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+  nats:
+    image: ${NATS_IMAGE:?Run lab.py init-controller}
+    restart: unless-stopped
+    command: [--js, --store_dir, /data, --user, localai, --pass, '${NATS_PASSWORD:?Missing NATS password}']
+    ports:
+      - '${CONTROLLER_BIND_IP:?Missing bind IP}:14222:4222'
+    volumes:
+      - nats-data:/data
+    logging: *logging
+
+  controller:
+    image: ${CONTROLLER_IMAGE:?Run lab.py init-controller}
+    init: true
+    restart: unless-stopped
+    ports:
+      - '${CONTROLLER_BIND_IP:?Missing bind IP}:18080:8080'
+    environment:
+      LOCALAI_DISTRIBUTED: 'true'
+      LOCALAI_AUTH: 'true'
+      LOCALAI_AUTH_DATABASE_URL: 'postgresql://localai:${POSTGRES_PASSWORD}@postgres:5432/localai?sslmode=disable'
+      LOCALAI_AUTH_HMAC_SECRET: ${AUTH_HMAC_SECRET:?Missing persistent HMAC secret}
+      LOCALAI_REGISTRATION_MODE: invite
+      LOCALAI_REGISTRATION_TOKEN: ${REGISTRATION_TOKEN:?Missing worker token}
+      LOCALAI_REGISTRATION_REQUIRE_AUTH: 'true'
+      LOCALAI_AUTO_APPROVE_NODES: 'false'
+      LOCALAI_NATS_URL: 'nats://localai:${NATS_PASSWORD}@nats:4222'
+      LOCALAI_MODELS_PATH: /models
+      LOCALAI_DATA_PATH: /data
+      LOCALAI_BACKENDS_PATH: /backends
+      LOCALAI_CONFIG_DIR: /configuration
+      LOCALAI_GENERATED_CONTENT_PATH: /data/generated
+      LOCALAI_UPLOAD_PATH: /data/uploads
+      LOCALAI_MODEL_SCHEDULING_CONFIG: /configuration/scheduling.yaml
+      LOCALAI_VRAM_WARM_LIMIT: '0'
+      LOCALAI_AUTOLOAD_GALLERIES: 'false'
+      LOCALAI_AUTOLOAD_BACKEND_GALLERIES: 'false'
+      LOCALAI_GALLERIES: '[{"name":"release","url":"github:mudler/LocalAI/gallery/index.yaml@v4.11.0"}]'
+      LOCALAI_BASE_URL: ${LOCALAI_BASE_URL:-}
+      LOCALAI_OIDC_ISSUER: ${OIDC_ISSUER:-}
+      LOCALAI_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      LOCALAI_OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      LOCALAI_DISABLE_LOCAL_AUTH: ${DISABLE_LOCAL_AUTH:-false}
+      GODEBUG: netdns=go
+    volumes:
+      - '${STATE_ROOT:?Missing state root}/models:/models'
+      - '${STATE_ROOT}/data:/data'
+      - '${STATE_ROOT}/backends:/backends'
+      - '${STATE_ROOT}/configuration:/configuration'
+    depends_on:
+      postgres: {condition: service_healthy}
+      nats: {condition: service_started}
+    healthcheck:
+      test: [CMD, curl, -fsS, --max-time, '5', 'http://127.0.0.1:8080/readyz']
+      start_period: 2m
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    logging: *logging
+
+volumes:
+  postgres-data:
+  nats-data:

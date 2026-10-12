@@ -1,0 +1,15 @@
+{
+  "status": "template-only",
+  "models": [
+    {
+      "alias": "coding-balanced",
+      "worker": "desk",
+      "repository": "REPLACE_WITH_MODEL_REPOSITORY",
+      "revision": "REPLACE_WITH_IMMUTABLE_COMMIT",
+      "files": [{"path": "REPLACE_WITH_MODEL_FILE", "sha256": "REPLACE_WITH_FILE_CHECKSUM"}],
+      "context_tokens": 32768,
+      "backend": "vulkan-llama-cpp",
+      "backend_oci_digest": "REPLACE_WITH_VERIFIED_BACKEND_DIGEST"
+    }
+  ]
+}

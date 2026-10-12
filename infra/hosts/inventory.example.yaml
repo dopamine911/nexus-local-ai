@@ -1,0 +1,7 @@
+all:
+  hosts:
+    desk:
+      # Replace with actual host/SSH user. This inventory targets Ubuntu machine 2 only.
+      ansible_host: 100.100.10.12
+      ansible_user: your_existing_admin
+      nexus_operator: your_existing_admin

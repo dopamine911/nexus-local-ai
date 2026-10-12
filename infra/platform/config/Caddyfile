@@ -1,0 +1,46 @@
+{
+    admin off
+    auto_https disable_redirects
+}
+
+(private_tls) {
+    tls internal
+}
+(guard) {
+    reverse_proxy /outpost.goauthentik.io/* authentik:9000
+    forward_auth authentik:9000 {
+        uri /outpost.goauthentik.io/auth/caddy
+        copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Email
+    }
+}
+
+https://auth.{$LAB_DOMAIN} {
+    import private_tls
+    reverse_proxy authentik:9000
+}
+https://{$LAB_DOMAIN} {
+    import private_tls
+    reverse_proxy homarr:7575
+}
+https://health.{$LAB_DOMAIN} {
+    import private_tls
+    reverse_proxy beszel:8090
+}
+https://ai.{$LAB_DOMAIN} {
+    import private_tls
+    reverse_proxy nexus-controller:8080
+}
+https://search.{$LAB_DOMAIN} {
+    import private_tls
+    route {
+        import guard
+        reverse_proxy searxng:8080
+    }
+}
+https://images.{$LAB_DOMAIN} {
+    import private_tls
+    route {
+        import guard
+        reverse_proxy comfyui:8188
+    }
+}

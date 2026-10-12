@@ -1,0 +1,8 @@
+{
+  "platform_state": "/srv/nexus/platform",
+  "localai_state": "/srv/nexus/localai-controller",
+  "staging_root": "/srv/nexus/backup-staging",
+  "nas_mount": "/mnt/nexus-backups",
+  "repository": "/mnt/nexus-backups/restic/nexus",
+  "workload_state": "/srv/nexus/workloads"
+}

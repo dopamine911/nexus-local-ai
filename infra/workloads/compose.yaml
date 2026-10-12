@@ -1,0 +1,54 @@
+services:
+  comfyui:
+    profiles: [image]
+    image: nexus-comfyui:${COMFY_COMMIT}
+    build:
+      context: .
+      args:
+        ROCM_IMAGE: ${ROCM_IMAGE:?Initialize workload configuration}
+        COMFY_COMMIT: ${COMFY_COMMIT}
+        COMFY_ARCHIVE_SHA256: ${COMFY_ARCHIVE_SHA256}
+    restart: 'no'
+    init: true
+    user: '${UID_NUM}:${GID_NUM}'
+    group_add: ['${VIDEO_GID}', '${RENDER_GID}']
+    devices: [/dev/kfd:/dev/kfd, /dev/dri:/dev/dri]
+    shm_size: 2gb
+    volumes: ['${STATE_ROOT}/comfyui:/workspace']
+    networks: [platform-ai]
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  gpu-probe:
+    profiles: [tools]
+    image: ${ROCM_IMAGE}
+    user: '${UID_NUM}:${GID_NUM}'
+    group_add: ['${VIDEO_GID}', '${RENDER_GID}']
+    devices: [/dev/kfd:/dev/kfd, /dev/dri:/dev/dri]
+    volumes: ['./gpu_probe.py:/tools/gpu_probe.py:ro']
+    command: [python3, /tools/gpu_probe.py]
+    network_mode: none
+    logging: *logging
+  training:
+    profiles: [training]
+    image: ${ROCM_IMAGE}
+    init: true
+    user: '${UID_NUM}:${GID_NUM}'
+    group_add: ['${VIDEO_GID}', '${RENDER_GID}']
+    devices: [/dev/kfd:/dev/kfd, /dev/dri:/dev/dri]
+    shm_size: 4gb
+    network_mode: none
+    working_dir: /workspace
+    environment: {HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HOME: /workspace}
+    volumes:
+      - '${STATE_ROOT}/training:/workspace'
+      - '${STATE_ROOT}/datasets:/datasets:ro'
+      - '${STATE_ROOT}/models:/models:ro'
+      - '${STATE_ROOT}/outputs:/outputs'
+    # A versioned recipe and dependencies must be supplied before a real fine-tune.
+    command: [python3, train.py]
+    logging: *logging
+networks:
+  platform-ai:
+    external: true
+    name: ${AI_NETWORK:?Platform project AI network}

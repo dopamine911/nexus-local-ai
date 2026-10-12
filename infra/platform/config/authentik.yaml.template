@@ -1,0 +1,70 @@
+version: 1
+metadata:
+  name: Nexus applications
+entries:
+  - model: authentik_core.group
+    id: users
+    identifiers: {name: homelab-users}
+  - model: authentik_core.group
+    id: admins
+    identifiers: {name: homelab-admins}
+  - model: authentik_providers_oauth2.scopemapping
+    id: verified-email
+    identifiers: {name: Nexus verified email}
+    attrs:
+      scope_name: email
+      expression: |
+        return {"email": request.user.email,
+                "email_verified": bool(request.user.attributes.get("email_verified", False))}
+  # Provisioned accounts only: no public enrollment source or signup flow.
+  # A second user must be added to homelab-users before these apps allow access.
+@@OIDC_ENTRIES@@
+  - model: authentik_providers_proxy.proxyprovider
+    id: search-provider
+    identifiers: {name: Nexus search}
+    attrs:
+      mode: forward_single
+      external_host: https://search.@@DOMAIN@@
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+  - model: authentik_core.application
+    id: search-app
+    identifiers: {slug: search}
+    attrs:
+      name: Search
+      provider: !KeyOf search-provider
+      policy_engine_mode: any
+  - model: authentik_policies.policybinding
+    identifiers: {target: !KeyOf search-app, order: 0}
+    attrs: {group: !KeyOf users}
+  - model: authentik_policies.policybinding
+    identifiers: {target: !KeyOf search-app, order: 1}
+    attrs: {user: !Find [authentik_core.user, [username, akadmin]]}
+  - model: authentik_providers_proxy.proxyprovider
+    id: image-provider
+    identifiers: {name: Nexus images}
+    attrs:
+      mode: forward_single
+      external_host: https://images.@@DOMAIN@@
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+  - model: authentik_core.application
+    id: image-app
+    identifiers: {slug: images}
+    attrs:
+      name: Images
+      provider: !KeyOf image-provider
+      policy_engine_mode: any
+  - model: authentik_policies.policybinding
+    identifiers: {target: !KeyOf image-app, order: 0}
+    attrs: {group: !KeyOf admins}
+  - model: authentik_policies.policybinding
+    identifiers: {target: !KeyOf image-app, order: 1}
+    attrs: {user: !Find [authentik_core.user, [username, akadmin]]}
+  - model: authentik_outposts.outpost
+    identifiers: {managed: goauthentik.io/outposts/embedded}
+    attrs:
+      providers: [!KeyOf search-provider, !KeyOf image-provider]
+      config:
+        authentik_host: https://auth.@@DOMAIN@@/
+        authentik_host_browser: https://auth.@@DOMAIN@@/

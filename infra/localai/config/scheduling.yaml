@@ -1,0 +1,10 @@
+# No models are installed automatically. After installing a model, add its exact
+# LocalAI name and a worker selector here, then run lab.py sync-config.
+# UI placement edits for names listed here are replaced at controller startup.
+# - model_name: coding-balanced
+#   node_selector:
+#     machine: desk
+# - model_name: coding-deep
+#   node_selector:
+#     machine: m5
+[]

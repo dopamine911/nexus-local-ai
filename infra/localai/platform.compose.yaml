@@ -1,0 +1,13 @@
+# Only enabled by stack.py connect-localai after CA export and admin bootstrap.
+services:
+  controller:
+    environment:
+      SSL_CERT_FILE: /configuration/trust/ca-bundle.crt
+    networks:
+      default: {}
+      platform-ai:
+        aliases: [nexus-controller]
+networks:
+  platform-ai:
+    external: true
+    name: ${AI_NETWORK:?Use stack.py connect-localai}

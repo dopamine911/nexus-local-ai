@@ -1,0 +1,46 @@
+services:
+  worker:
+    image: ${WORKER_IMAGE:?Missing worker image}
+    command: [worker]
+    init: true
+    restart: unless-stopped
+    ports:
+      - '${WORKER_BIND_IP:?Missing worker IP}:50050:50050'
+      - '${WORKER_BIND_IP}:50051-50100:50051-50100'
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/kfd:/dev/kfd
+    group_add:
+      - '${RENDER_GID:?Set host render group GID}'
+      - '${VIDEO_GID:?Set host video group GID}'
+    environment:
+      LOCALAI_REGISTER_TO: 'http://${CONTROLLER_IP:?Missing controller IP}:18080'
+      LOCALAI_REGISTRATION_TOKEN: ${REGISTRATION_TOKEN:?Missing worker token}
+      LOCALAI_REGISTRATION_REQUIRE_AUTH: 'true'
+      LOCALAI_NODE_NAME: ${NODE_NAME:?Missing node name}
+      LOCALAI_NODE_LABELS: 'machine=${NODE_NAME},gpu=amd'
+      LOCALAI_NATS_URL: 'nats://localai:${NATS_PASSWORD:?Missing NATS password}@${CONTROLLER_IP}:14222'
+      LOCALAI_SERVE_ADDR: '0.0.0.0:50051'
+      LOCALAI_HTTP_ADDR: '0.0.0.0:50050'
+      LOCALAI_ADVERTISE_ADDR: '${WORKER_BIND_IP}:50051'
+      LOCALAI_ADVERTISE_HTTP_ADDR: '${WORKER_BIND_IP}:50050'
+      LOCALAI_GRPC_MAX_PORT: '50100'
+      LOCALAI_MODELS_PATH: /models
+      LOCALAI_BACKENDS_PATH: /backends
+      LOCALAI_VRAM_BUDGET: ${VRAM_BUDGET:-80%}
+      GODEBUG: netdns=go
+    volumes:
+      - '${STATE_ROOT:?Missing state root}/models:/models'
+      - '${STATE_ROOT}/backends:/backends'
+      - '${STATE_ROOT}/data:/data'
+      - '${STATE_ROOT}/staging:/staging'
+      - '${STATE_ROOT}/cache:/cache'
+    healthcheck:
+      test: [CMD, curl, -fsS, --max-time, '5', 'http://127.0.0.1:50050/readyz']
+      start_period: 2m
+      interval: 15s
+      timeout: 10s
+      retries: 20
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}

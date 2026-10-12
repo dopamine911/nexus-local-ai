@@ -1,0 +1,189 @@
+services:
+  caddy:
+    image: ${CADDY_IMAGE:?Initialize platform}
+    restart: unless-stopped
+    ports:
+      - '${BIND_IP}:443:443'
+    environment: {LAB_DOMAIN: '${LAB_DOMAIN}'}
+    volumes:
+      - '${STATE_ROOT}/config/Caddyfile:/etc/caddy/Caddyfile:ro'
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        aliases: ['auth.${LAB_DOMAIN}']
+      ai:
+        aliases: ['auth.${LAB_DOMAIN}']
+    logging: &logging
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+
+  auth-db:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD}
+    volumes: [auth-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U authentik -d authentik']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *logging
+
+  authentik:
+    image: ${AUTHENTIK_IMAGE}
+    restart: unless-stopped
+    command: server
+    shm_size: 512mb
+    environment: &auth-env
+      AUTHENTIK_POSTGRESQL__HOST: auth-db
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTH_DB_PASSWORD}
+      AUTHENTIK_SECRET_KEY: ${AUTH_SECRET_KEY}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${ADMIN_EMAIL}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
+      HOMARR_OIDC_SECRET: ${HOMARR_OIDC_SECRET}
+      LOCALAI_OIDC_SECRET: ${LOCALAI_OIDC_SECRET}
+      BESZEL_OIDC_SECRET: ${BESZEL_OIDC_SECRET}
+    volumes: [auth-data:/data, auth-media:/media]
+    depends_on: {auth-db: {condition: service_healthy}}
+    healthcheck:
+      test: [CMD, ak, healthcheck]
+      interval: 20s
+      timeout: 10s
+      start_period: 2m
+      retries: 20
+    logging: *logging
+
+  auth-worker:
+    image: ${AUTHENTIK_IMAGE}
+    restart: unless-stopped
+    command: worker
+    shm_size: 512mb
+    environment: *auth-env
+    volumes:
+      - auth-data:/data
+      - auth-media:/media
+      - '${STATE_ROOT}/config/blueprints:/blueprints/custom:ro'
+    depends_on: {auth-db: {condition: service_healthy}}
+    healthcheck:
+      test: [CMD, ak, healthcheck]
+      interval: 20s
+      timeout: 10s
+      start_period: 2m
+      retries: 20
+    logging: *logging
+
+  homarr:
+    image: ${HOMARR_IMAGE}
+    restart: unless-stopped
+    environment:
+      SECRET_ENCRYPTION_KEY: ${HOMARR_ENCRYPTION_KEY}
+      AUTH_PROVIDERS: ${HOMARR_AUTH_PROVIDERS}
+      AUTH_OIDC_ISSUER: 'https://auth.${LAB_DOMAIN}/application/o/homarr/'
+      AUTH_OIDC_CLIENT_ID: homarr
+      AUTH_OIDC_CLIENT_SECRET: ${HOMARR_OIDC_SECRET}
+      AUTH_OIDC_CLIENT_NAME: Authentik
+      AUTH_OIDC_AUTO_LOGIN: 'false'
+      AUTH_OIDC_GROUPS_ATTRIBUTE: groups
+      AUTH_OIDC_SCOPE_OVERWRITE: openid email profile
+      AUTH_OIDC_ENABLE_DANGEROUS_ACCOUNT_LINKING: 'false'
+      AUTH_OIDC_ENABLE_DANGEROUS_CREDENTIALS_LINKING: 'false'
+      NODE_EXTRA_CA_CERTS: /trust/root.crt
+    volumes:
+      - homarr-data:/appdata
+      - '${STATE_ROOT}/trust:/trust:ro'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:7575/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      start_period: 1m
+      retries: 12
+    logging: *logging
+
+  beszel:
+    image: ${BESZEL_IMAGE}
+    restart: unless-stopped
+    environment:
+      APP_URL: 'https://health.${LAB_DOMAIN}'
+      USER_CREATION: 'false'
+      DISABLE_PASSWORD_AUTH: 'false'
+      SSL_CERT_FILE: /trust/ca-bundle.crt
+    volumes:
+      - beszel-data:/beszel_data
+      - '${STATE_ROOT}/trust:/trust:ro'
+    healthcheck:
+      test: [CMD, /beszel, health, --url, 'http://localhost:8090']
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  searxng:
+    image: ${SEARXNG_IMAGE}
+    profiles: [research]
+    restart: unless-stopped
+    environment: {SEARXNG_BASE_URL: 'https://search.${LAB_DOMAIN}/'}
+    volumes:
+      - '${STATE_ROOT}/config/searxng:/etc/searxng:ro'
+      - search-cache:/var/cache/searxng
+    depends_on: [valkey]
+    networks: [default, ai]
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=5).close()"]
+      interval: 15s
+      timeout: 10s
+      start_period: 1m
+      retries: 12
+    logging: *logging
+  valkey:
+    image: ${VALKEY_IMAGE}
+    profiles: [research]
+    restart: unless-stopped
+    command: [valkey-server, --save, '', --appendonly, 'no']
+    logging: *logging
+
+  memory:
+    image: ${MEMORY_IMAGE}
+    profiles: [memory]
+    # Started per MCP session using compose run --rm -T; no unauthenticated HTTP server.
+    command: [basic-memory, mcp, --transport, stdio]
+    stdin_open: true
+    volumes: [memory-data:/app/data, memory-config:/app/.basic-memory]
+    logging: *logging
+
+  snapshot:
+    image: ${ALPINE_IMAGE}
+    profiles: [tools]
+    network_mode: none
+    volumes:
+      - caddy-data:/state/caddy-data
+      - caddy-config:/state/caddy-config
+      - auth-data:/state/auth-data
+      - auth-media:/state/auth-media
+      - homarr-data:/state/homarr-data
+      - beszel-data:/state/beszel-data
+      - memory-data:/state/memory-data
+      - memory-config:/state/memory-config
+    entrypoint: [tar]
+    logging: *logging
+
+volumes:
+  caddy-data:
+  caddy-config:
+  auth-db:
+  auth-data:
+  auth-media:
+  homarr-data:
+  beszel-data:
+  search-cache:
+  memory-data:
+  memory-config:
+networks:
+  ai:
+    name: ${PROJECT_NAME}-ai

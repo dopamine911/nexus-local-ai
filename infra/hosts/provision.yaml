@@ -1,0 +1,104 @@
+---
+- name: Prepare Ubuntu machine 2 for Nexus containers
+  hosts: all
+  become: true
+  gather_facts: true
+  vars:
+    docker_packages:
+      - docker-ce=5:29.9.0-1~ubuntu.24.04~noble
+      - docker-ce-cli=5:29.9.0-1~ubuntu.24.04~noble
+      - containerd.io=2.4.1-2~ubuntu.24.04~noble
+      - docker-buildx-plugin=0.38.0-1~ubuntu.24.04~noble
+      - docker-compose-plugin=5.6.0-1~ubuntu.24.04~noble
+      - tailscale=1.104.1
+  tasks:
+    - name: Require the supported host baseline and an explicit operator
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '24.04'
+          - ansible_facts.architecture == 'x86_64'
+          - nexus_operator is defined
+          - nexus_operator != 'your_existing_admin'
+        fail_msg: Select Ubuntu 24.04 amd64 on machine 2 and set the real existing deployment operator.
+    - name: Verify the named deployment operator already exists
+      ansible.builtin.getent:
+        database: passwd
+        key: '{{ nexus_operator }}'
+        fail_key: true
+    - name: Gather existing package inventory
+      ansible.builtin.package_facts:
+        manager: apt
+    - name: Refuse to replace a conflicting container runtime implicitly
+      ansible.builtin.assert:
+        that:
+          - item not in ansible_facts.packages
+        fail_msg: Review and remove the conflicting package before this new-host bootstrap.
+      loop: [docker.io, docker-compose, docker-compose-v2, podman-docker, containerd, runc]
+    - name: Install baseline utilities
+      ansible.builtin.apt:
+        name: [ca-certificates, python3, git, curl]
+        state: present
+        update_cache: true
+    - name: Prepare repository signing-key directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+    - name: Install checksum-pinned Docker signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/nexus-docker.asc
+        checksum: sha256:1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
+        mode: '0644'
+    - name: Install checksum-pinned Tailscale signing key
+      ansible.builtin.get_url:
+        url: https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg
+        dest: /etc/apt/keyrings/nexus-tailscale.gpg
+        checksum: sha256:3e03dacf222698c60b8e2f990b809ca1b3e104de127767864284e6c228f1fb39
+        mode: '0644'
+    - name: Configure official signed repositories
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nexus-containers.list
+        content: |
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/nexus-docker.asc] https://download.docker.com/linux/ubuntu noble stable
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/nexus-tailscale.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main
+        mode: '0644'
+    - name: Install explicitly selected container and access versions
+      ansible.builtin.apt:
+        name: '{{ docker_packages }}'
+        state: present
+        update_cache: true
+        allow_downgrade: false
+    - name: Hold runtime packages until a reviewed upgrade
+      ansible.builtin.dpkg_selections:
+        name: '{{ item.split("=")[0] }}'
+        selection: hold
+      loop: '{{ docker_packages }}'
+    - name: Enable container and tailnet daemons
+      ansible.builtin.systemd_service:
+        name: '{{ item }}'
+        enabled: true
+        state: started
+      loop: [docker, tailscaled]
+    - name: Grant only the named power operator container administration
+      ansible.builtin.user:
+        name: '{{ nexus_operator }}'
+        groups: docker
+        append: true
+    - name: Prepare private persistent state directory
+      ansible.builtin.file:
+        path: /srv/nexus
+        state: directory
+        owner: '{{ nexus_operator }}'
+        mode: '0700'
+    - name: Record installed runtime package inventory
+      ansible.builtin.command: dpkg-query -W docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin tailscale
+      register: nexus_package_receipt
+      changed_when: false
+    - name: Save host receipt for recovery
+      ansible.builtin.copy:
+        dest: /srv/nexus/host-packages.txt
+        content: '{{ nexus_package_receipt.stdout }}\n'
+        owner: '{{ nexus_operator }}'
+        mode: '0600'
